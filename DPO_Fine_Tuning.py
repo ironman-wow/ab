@@ -195,45 +195,63 @@ push_model_to_hub(model, tokenizer, "ironman-wow/test_model")
 
 
 
-def format_for_dpo(examples):
+def format_and_tokenize_for_dpo(examples, tokenizer, max_length=None):
     """
-    Formats dataset examples for DPO (Direct Preference Optimization) training.
+    Formats and tokenizes dataset examples for DPO training.
     
     Args:
         examples (dict): Dictionary containing 'prompt', 'chosen', and 'rejected' keys
+        tokenizer: The tokenizer to use for encoding the texts
+        max_length (int, optional): Maximum length for tokenization. If None, no truncation is applied.
         
     Returns:
-        dict: Formatted dictionary with prompts, chosen responses, and rejected responses
+        dict: Formatted and tokenized dictionary for DPO training
     """
     prompts = examples["prompt"]
     chosen_responses = examples["chosen"]
     rejected_responses = examples["rejected"]
     
-    # Initialize lists to store formatted data
-    formatted_prompts = []
-    formatted_chosen = []
-    formatted_rejected = []
+    # Format data
+    formatted_data = {
+        "prompt": prompts,
+        "chosen": chosen_responses,
+        "rejected": rejected_responses
+    }
     
-    for prompt, chosen, rejected in zip(prompts, chosen_responses, rejected_responses):
-        # Store raw prompt without any template
-        formatted_prompts.append(prompt)
-        
-        # Store chosen and rejected responses directly
-        formatted_chosen.append(chosen)
-        formatted_rejected.append(rejected)
+    # If max_length is None, tokenizer will use its model's maximum length
+    tokenized_prompts = tokenizer(
+        formatted_data["prompt"],
+        truncation=False,
+        padding=True
+    )
+    tokenized_chosen = tokenizer(
+        formatted_data["chosen"],
+        truncation=False,
+        padding=True
+    )
+    tokenized_rejected = tokenizer(
+        formatted_data["rejected"],
+        truncation=False,
+        padding=True
+    )
     
-    # Return in the format expected by DPOTrainer
     return {
-        "prompt": formatted_prompts,
-        "chosen": formatted_chosen,
-        "rejected": formatted_rejected
+        "prompt": formatted_data["prompt"],
+        "chosen": formatted_data["chosen"],
+        "rejected": formatted_data["rejected"],
+        "input_ids": tokenized_prompts["input_ids"],
+        "attention_mask": tokenized_prompts["attention_mask"],
+        "chosen_input_ids": tokenized_chosen["input_ids"],
+        "chosen_attention_mask": tokenized_chosen["attention_mask"],
+        "rejected_input_ids": tokenized_rejected["input_ids"],
+        "rejected_attention_mask": tokenized_rejected["attention_mask"]
     }
 
-# Apply the formatting function to your dataset
+# Apply the formatting and tokenization to your dataset
 formatted_dataset = dataset.map(
-    format_for_dpo,
+    format_and_tokenize_for_dpo,
     batched=True,
-    remove_columns=dataset.column_names
+    remove_columns=dataset.column_names,
+    fn_kwargs={"tokenizer": tokenizer}
 )
-
 
