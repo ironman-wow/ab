@@ -194,3 +194,46 @@ save_model_and_tokenizer(model, tokenizer, "dpo_model")
 push_model_to_hub(model, tokenizer, "ironman-wow/test_model")
 
 
+
+def format_for_dpo(examples):
+    """
+    Formats dataset examples for DPO (Direct Preference Optimization) training.
+    
+    Args:
+        examples (dict): Dictionary containing 'prompt', 'chosen', and 'rejected' keys
+        
+    Returns:
+        dict: Formatted dictionary with prompts, chosen responses, and rejected responses
+    """
+    prompts = examples["prompt"]
+    chosen_responses = examples["chosen"]
+    rejected_responses = examples["rejected"]
+    
+    # Initialize lists to store formatted data
+    formatted_prompts = []
+    formatted_chosen = []
+    formatted_rejected = []
+    
+    for prompt, chosen, rejected in zip(prompts, chosen_responses, rejected_responses):
+        # Store raw prompt without any template
+        formatted_prompts.append(prompt)
+        
+        # Store chosen and rejected responses directly
+        formatted_chosen.append(chosen)
+        formatted_rejected.append(rejected)
+    
+    # Return in the format expected by DPOTrainer
+    return {
+        "prompt": formatted_prompts,
+        "chosen": formatted_chosen,
+        "rejected": formatted_rejected
+    }
+
+# Apply the formatting function to your dataset
+formatted_dataset = dataset.map(
+    format_for_dpo,
+    batched=True,
+    remove_columns=dataset.column_names
+)
+
+
