@@ -1,209 +1,22 @@
-import os
-from unsloth import FastLanguageModel
-import torch
-from datasets import load_dataset
-from datasets import Dataset
-from unsloth import is_bfloat16_supported
-from huggingface_hub import login
-import pandas as pd
-import re
-import nltk
-nltk.download('punkt')
-nltk.download('wordnet')
-nltk.download('omw-1.4')
-import numpy as np
-from scipy.stats import pearsonr
-from nltk.translate.bleu_score import corpus_bleu
-from nltk.translate.meteor_score import meteor_score
-from rouge_score import rouge_scorer
-from bert_score import score
-from sacrebleu.metrics import BLEU
-from nltk.tokenize import word_tokenize
-from sentence_transformers import SentenceTransformer
-import numpy as np
+Autonomous Generation of Process Flow and Instrumentation Diagrams Using a Small Foundational Model
+Introduction and Motivation
+Chemical process design heavily relies on Process Flow Diagrams (PFDs) and Piping and Instrumentation Diagrams (PIDs), which are essential for visualizing industrial workflows, ensuring operational safety, and complying with regulatory standards. However, as chemical processes become more complex, manually designing these diagrams becomes increasingly time-consuming and prone to human error. The transition toward automation and digitalization in industrial operations necessitates intelligent systems capable of streamlining diagram generation while maintaining accuracy and consistency.
 
-# Set environment variables
-os.environ["WANDB_DISABLED"] = "true"
+To address these challenges, we present an AI-driven framework that employs a small foundational model (LLaMA 3.2 1B) trained on chemical engineering data to automate the generation of PFDs, PIDs, and synthetic process pipelines. Our approach significantly reduces manual workload, enhances process design accuracy, and facilitates faster decision-making. By leveraging the capabilities of large-scale LLMs to generate synthetic datasets tailored to chemical engineering tasks, we fine-tune this specialized model to perform these tasks efficiently.
 
-def generate_response_inference(question, model, tokenizer):
-    """
-    Generates a response to a given question using the fine-tuned model.
+Methodology
+The core of our approach involves a multi-stage framework designed to generate high-quality process diagrams with minimal expert intervention. First, we use large LLMs to create a synthetic dataset containing process pipelines, PFDs, and PIDs for 1,005 chemicals. This dataset is then used to fine-tune LLaMA 3.2 1B, equipping it with domain-specific knowledge to automate process diagram generation. Additionally, a diverse set of question-answer pairs covering fundamental chemical engineering concepts is generated to enhance the model’s logical reasoning and decision-making capabilities.
 
-    Args:
-        question (str): The input question to generate a response for.
-        model (torch.nn.Module): The fine-tuned model used for inference.
-        tokenizer (transformers.PreTrainedTokenizer): The tokenizer for the model.
+To further refine the model’s output, we implement Direct Preference Optimization (DPO) and Reinforcement Learning with Human Feedback (RLHF). These techniques allow the model to iteratively improve its responses by selecting preferred answers based on expert feedback. We also introduce Retrieval-Augmented Generation (RAG) to improve contextual understanding and information retrieval. Our RAG implementation operates at two levels: local RAG, which processes and retrieves information from individual documents, and global RAG, which consolidates data from multiple sources to provide a more comprehensive knowledge base.
 
-    Returns:
-        str: The generated response.
+To structure and organize chemical process knowledge, we employ ontological knowledge graphs built using Neo4j. These graphs enable the model to infer relationships between chemical compounds, process parameters, and instrumentation components, ensuring greater accuracy in diagram generation. Our framework is designed as a multi-agent system, where a meta-agent orchestrates various specialized agents, including a critique agent that evaluates the quality of generated diagrams and a reward model that refines outputs based on learned preferences. Human feedback is integrated into this system to provide continuous learning and adaptation.
 
-    Raises:
-        ValueError: If the model or tokenizer is not properly loaded.
-        Exception: For any other errors during inference.
-    """
-    try:
-        FastLanguageModel.for_inference(model)  # Enable native 2x faster inference
+Validation and Benchmarking
+We conducted extensive evaluations to measure the effectiveness of our framework. A benchmark dataset of 1,500 test questions was created to assess model performance on known chemicals. Additionally, to evaluate generalization to unseen chemical processes, we tested the model on an extra set of 50 chemicals. We compared LLaMA 3.2 1B against a large general-purpose LLM using NVIDIA Nemotron reward model, evaluating helpfulness, correctness, coherence, complexity, and verbosity. The results demonstrated that our small foundational model performed comparably to the large LLM while being computationally more efficient. Furthermore, its ability to handle counter-questions and optimize responses through preference learning resulted in enhanced reasoning and contextual accuracy.
 
-        # Define the prompt template
-        alpaca_prompt = """You will be provided with a question. Your task is to generate the correct response based on the question.
+To validate real-world applicability, we performed first-principle verification of selected PFDs using DWSIM, an open-source process simulation tool. This ensured that the generated process diagrams aligned with thermodynamic and mass balance principles, further confirming the reliability of our approach. The integration of knowledge graphs and retrieval mechanisms improved contextual retrieval accuracy, making our system highly suitable for industrial applications.
 
-        ### Question:
-        {}
+Impact and Future Directions
+This work represents a significant step toward automating process diagram generation using a small foundational model tailored for chemical engineering tasks. By reducing manual effort and improving design accuracy, our framework enhances the efficiency of process engineering workflows. The combination of multi-agent coordination, reinforcement learning, and retrieval-augmented generation ensures adaptability across various industrial scenarios. Our findings highlight that small, domain-focused models can achieve performance levels comparable to large LLMs while being more efficient and practical for specialized applications.
 
-        ### Response:
-        {}"""
-
-        # Prepare the input for inference
-        inputs = tokenizer(
-            [
-                alpaca_prompt.format(
-                    question,  # Question
-                    "",  # Output - leave this blank for generation!
-                )
-            ], return_tensors="pt").to("cuda")
-
-        # Generate the response
-        outputs = model.generate(**inputs, max_new_tokens=4096, use_cache=True)
-        #response = tokenizer.batch_decode(outputs)
-        response = tokenizer.batch_decode(outputs, skip_special_tokens=True)[0]
-        response = response.split("### Response:")[-1].strip()
-
-        return response
-
-    except ValueError as e:
-        print(f"Error: Invalid model or tokenizer configuration. {e}")
-        raise
-    except Exception as e:
-        print(f"An error occurred during inference: {e}")
-        raise
-
-def calculate_nlp_metrics(ground_truth, model_responses):
-    # Ensure inputs are lists of strings
-    assert all(isinstance(s, str) for s in ground_truth)
-    assert all(isinstance(s, str) for s in model_responses)
-    assert len(ground_truth) == len(model_responses)
-
-    # Tokenize sentences
-    ground_truth_tokens = [word_tokenize(sentence) for sentence in ground_truth]
-    model_response_tokens = [word_tokenize(sentence) for sentence in model_responses]
-
-    # BLEU Score
-    bleu = corpus_bleu([[ref] for ref in ground_truth_tokens], model_response_tokens)
-
-    # METEOR Score
-    meteor = np.mean([meteor_score([ref], hyp) for ref, hyp in zip(ground_truth_tokens, model_response_tokens)])
-
-    # ROUGE Score
-    scorer = rouge_scorer.RougeScorer(['rouge1', 'rouge2', 'rougeL'], use_stemmer=True)
-    rouge_scores = [scorer.score(ref, hyp) for ref, hyp in zip(ground_truth, model_responses)]
-    rouge1 = np.mean([score['rouge1'].fmeasure for score in rouge_scores])
-    rouge2 = np.mean([score['rouge2'].fmeasure for score in rouge_scores])
-    rougeL = np.mean([score['rougeL'].fmeasure for score in rouge_scores])
-
-    # BERTScore
-    P, R, F1 = score(model_responses, ground_truth, lang="en", verbose=False)
-    bert_score = F1.mean().item()
-
-    # SacreBLEU Score
-    sacrebleu = BLEU()
-    sacrebleu_score = sacrebleu.corpus_score(model_responses, [ground_truth]).score
-
-    # Pearson Correlation
-    # We need numerical values for correlation, so we'll use the ROUGE-L scores
-    rougeL_scores = [scorer.score(ref, hyp)['rougeL'].fmeasure for ref, hyp in zip(ground_truth, model_responses)]
-    #pearson_corr, _ = pearsonr(range(len(ground_truth)), rougeL_scores)
-
-    #similarityScore
-    model_sim = SentenceTransformer('BAAI/bge-large-zh-v1.5')
-    embeddings_1 = model_sim.encode(model_responses, normalize_embeddings=True)
-    embeddings_2 = model_sim.encode(ground_truth, normalize_embeddings=True)
-    similarity = embeddings_1 @ embeddings_2.T
-    diagonal_values = np.diag(similarity)
-    # Calculate the average of the diagonal values
-    average_diagonal = np.mean(diagonal_values)
-
-    return {
-        "BLEU": bleu,
-        "METEOR": meteor,
-        "ROUGE-1": rouge1,
-        "ROUGE-2": rouge2,
-        "ROUGE-L": rougeL,
-        "BERTScore": bert_score,
-        "SacreBLEU": sacrebleu_score,
-        "Similarity": average_diagonal,
-        #"Pearson Correlation": pearson_corr
-    }
-
-def formatting_prompts_func(examples):
-    """
-    Formats the prompts for fine-tuning by adding the question and response structure.
-
-    Args:
-        examples (dict): A dictionary containing questions and responses.
-
-    Returns:
-        dict: A dictionary containing the formatted text.
-    """
-    alpaca_prompt = """You will be provided with a question. Your task is to generate the correct response based on the question.
-
-    ### Question:
-    {}
-
-    ### Response:
-    {}"""
-    EOS_TOKEN = tokenizer.eos_token  # Must add EOS_TOKEN
-    questions = examples["question"]
-    responses = examples["response"]
-    texts = []
-    for question, response in zip(questions, responses):
-        text = alpaca_prompt.format(question, response) + EOS_TOKEN
-        texts.append(text)
-    return {"text": texts}
-
-max_seq_length = 4096  # Choose any! We auto support RoPE Scaling internally!
-dtype = None  # None for auto detection. Float16 for Tesla T4, V100, Bfloat16 for Ampere+
-load_in_4bit = True  # Use 4bit quantization to reduce memory usage. Can be False.
-
-# Load the model and tokenizer
-model, tokenizer = FastLanguageModel.from_pretrained(
-    model_name="ironman-wow/QA_fineTunedModel",
-    max_seq_length=max_seq_length,
-    dtype=dtype,
-    load_in_4bit=load_in_4bit,
-)
-
-#Load Dataset
-dataset = load_dataset('ironman-wow/QA_fineTuning1')
-if isinstance(dataset, dict):
-    dataset = Dataset.from_dict(dataset["train"].to_dict())
-
-split_dataset = dataset.train_test_split(test_size=0.05, seed=42)
-train_dataset = split_dataset['train']
-train_dataset = train_dataset.map(formatting_prompts_func, batched=True)
-test_dataset = split_dataset['test']
-test_dataset = test_dataset.map(formatting_prompts_func, batched=True)
-
-df = pd.DataFrame(test_dataset)
-
-extracted_data = df['question']
-questions = extracted_data.tolist()
-
-extracted_data = df['response']
-ground_responses = extracted_data.tolist()
-
-model_response = []
-counter = 0
-for question in questions:   
-  response = generate_response_inference(question, model, tokenizer)
-  #print(question)
-  #print(response)
-  model_response.append(response)
-  counter = counter+1
-  print(counter)
-  
-# print(ground_responses)
-# print(model_response)
-
-results = calculate_nlp_metrics(ground_responses, model_response)
-for metric, value in results.items():
-    print(f"{metric}: {value}")
+Future research will focus on expanding the model’s capabilities, particularly in real-time process simulation and dynamic validation of generated diagrams. We also aim to integrate the framework with industry-standard tools such as Aspen Plus, further improving its utility. By advancing AI-driven automation in chemical process design, this work lays the foundation for more scalable, efficient, and regulation-compliant solutions for industrial applications.
