@@ -1,5 +1,1 @@
-The primary technology gap in addressing the business problem lies in **limited real-world data availability** and the **over-reliance on oversimplified synthetic datasets**, which hampers the model’s ability to generalize effectively to real industrial scenarios.
-
-While existing models like the Generative Flowsheet Transformer, SFILES2Seq, and PID-TALK utilize synthetic data for pre-training, this data often lacks the variability, complexity, and context found in actual industrial process flowsheets. As a result, models trained predominantly on synthetic examples struggle to handle diverse real-world scenarios, leading to unstable generalization and potential safety concerns in generated outputs.
-
-To bridge this gap, there is a **pressing need to curate higher-quality, semantically rich synthetic datasets** that go beyond simple syntactic variations. These datasets should capture **functional, topological, and contextual diversity**—such as varying process conditions, unit operation justifications, and safety requirements—to better simulate industrial variability. Without such curated synthetic data, the models remain limited in their applicability to early-stage process development and real-world deployment.
+gf
